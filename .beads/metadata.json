@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "Harness_Athena",
+  "project_id": "ed7f0ad0-82af-4ca4-86e6-27bf0ae7e443"
+}
