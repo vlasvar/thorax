@@ -1,0 +1,1 @@
+{"id":"int-d505335c3ef9ac2f34248e6c52ff0fc1","kind":"field_change","created_at":"2026-07-05T14:20:27.9520024Z","actor":"vlasvar","issue_id":"thorax-1fb.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Standalone architecture, TypeScript workspace, shared contracts, schema, and test baseline implemented and verified."}}

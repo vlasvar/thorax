@@ -1,0 +1,18 @@
+{
+  "$schema": "./packages/shared-types/schema/thorax-config.schema.json",
+  "dataDirectory": ".thorax",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 4317
+  },
+  "codex": {
+    "command": "codex",
+    "approvalPolicy": "on-request",
+    "sandbox": "workspace-write"
+  },
+  "memory": {
+    "autoStageEphemeral": true,
+    "reflectionIntervalMinutes": 30
+  }
+}
+
