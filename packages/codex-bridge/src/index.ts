@@ -78,8 +78,8 @@ export interface CodexRuntimeOptions {
 
 const DEFAULT_TIMEOUTS: RuntimeTimeouts = {
   healthMs: 5_000,
-  startupMs: 10_000,
-  handshakeMs: 10_000,
+  startupMs: 30_000,
+  handshakeMs: 60_000,
   turnMs: 10 * 60_000,
   interruptMs: 10_000,
   shutdownMs: 3_000,
@@ -201,6 +201,7 @@ export class CodexRuntime {
     };
     options.signal?.addEventListener("abort", onAbort);
 
+    let activeError: unknown = null;
     try {
       await withTimeout(
         connection.send({
@@ -382,17 +383,19 @@ export class CodexRuntime {
         }
       }
     } catch (error) {
-      if (error instanceof CodexBridgeError) throw error;
-      throw new CodexBridgeError("PROCESS_FAILURE", errorMessage(error), "Restart Codex and retry the turn.", undefined, { cause: error });
+      activeError = error instanceof CodexBridgeError ? error : new CodexBridgeError("PROCESS_FAILURE", errorMessage(error), "Restart Codex and retry the turn.", undefined, { cause: error });
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
       try {
         await withTimeout(connection.close(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Codex app-server did not shut down in time.");
       } catch (error) {
         await withTimeout(connection.terminate(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Forced Codex shutdown timed out.").catch(() => undefined);
-        if (error instanceof CodexBridgeError) throw error;
-        throw new CodexBridgeError("PROCESS_FAILURE", "Codex app-server cleanup failed.", "Restart Codex and retry.", undefined, { cause: error });
+        if (!activeError) {
+          if (error instanceof CodexBridgeError) activeError = error;
+          else activeError = new CodexBridgeError("PROCESS_FAILURE", "Codex app-server cleanup failed.", "Restart Codex and retry.", undefined, { cause: error });
+        }
       }
+      if (activeError) throw activeError;
     }
   }
 }
@@ -424,20 +427,26 @@ class NodeAppServerConnection implements AppServerConnection {
   #failure: Error | undefined;
 
   constructor(private readonly child: ChildProcessWithoutNullStreams) {
-    child.stderr.resume();
+    child.stderr.on("data", (data) => console.error("CODEX APP-SERVER STDERR:", data.toString().trim()));
     child.on("error", (error) => { this.#failure = error; });
   }
 
   send(message: RpcMessage): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.child.stdin.writable || this.child.stdin.destroyed) return reject(new Error("Codex app-server stdin is closed."));
+      console.error("CODEX APP-SERVER SENDING:", JSON.stringify(message));
       this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => error ? reject(error) : resolve());
     });
   }
 
   async *messages(): AsyncIterable<string> {
     const lines = createInterface({ input: this.child.stdout, crlfDelay: Infinity });
-    for await (const line of lines) if (line.trim()) yield line;
+    for await (const line of lines) {
+      if (line.trim()) {
+        console.error("CODEX APP-SERVER RECEIVED:", line);
+        yield line;
+      }
+    }
     if (this.#failure) throw this.#failure;
   }
 
