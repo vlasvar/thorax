@@ -389,11 +389,8 @@ export class CodexRuntime {
       try {
         await withTimeout(connection.close(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Codex app-server did not shut down in time.");
       } catch (error) {
+        console.error("Warning: Codex app-server shutdown timed out, forcing termination:", error);
         await withTimeout(connection.terminate(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Forced Codex shutdown timed out.").catch(() => undefined);
-        if (!activeError) {
-          if (error instanceof CodexBridgeError) activeError = error;
-          else activeError = new CodexBridgeError("PROCESS_FAILURE", "Codex app-server cleanup failed.", "Restart Codex and retry.", undefined, { cause: error });
-        }
       }
       if (activeError) throw activeError;
     }
