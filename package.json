@@ -10,9 +10,9 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w @thorax/server",
-    "test": "vitest run",
+    "test": "npm run test --workspaces --if-present",
     "test:watch": "vitest",
-    "typecheck": "tsc -b",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
@@ -24,4 +24,3 @@
     "node": ">=22.19"
   }
 }
-

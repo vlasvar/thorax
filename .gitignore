@@ -3,8 +3,8 @@ dist/
 .turbo/
 coverage/
 .thorax/
+*.tsbuildinfo
 *.log
 .env
 .env.*
 !.env.example
-

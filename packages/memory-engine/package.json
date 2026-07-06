@@ -1,5 +1,5 @@
 {
-  "name": "@thorax/shared-types",
+  "name": "@thorax/memory-engine",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,13 +13,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run",
-    "typecheck": "tsc -b --pretty false"
-  },
-  "devDependencies": {
-    "zod": "^3.25.67"
-  },
-  "dependencies": {
-    "zod": "^3.25.67"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run src"
   }
 }
