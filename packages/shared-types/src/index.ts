@@ -70,6 +70,38 @@ export const thoraxConfigSchema = z.object({
   }),
 });
 
+export const agentSummarySchema = agentDefinitionSchema.pick({ id: true, name: true }).extend({
+  role: z.string().min(1),
+  state: z.enum(["ready", "working", "offline"]),
+});
+export const projectSummarySchema = projectDefinitionSchema.pick({ id: true, name: true, rootPath: true });
+export const conversationMessageSchema = z.object({
+  id: z.string().min(1), author: z.string().min(1), content: z.string().min(1), createdAt: z.string().datetime(),
+});
+export const conversationSummarySchema = z.object({ id: z.string().min(1), messages: z.array(conversationMessageSchema) });
+export const memoryReviewCandidateSchema = z.object({
+  id: z.string().min(1), content: z.string().min(1), scope: memoryScopeSchema,
+  source: z.string().min(1), createdAt: z.string().datetime(),
+});
+export const learningEventSchema = z.object({
+  id: z.string().min(1), title: z.string().min(1), detail: z.string().min(1), createdAt: z.string().datetime(),
+});
+export const runtimeSummarySchema = z.object({
+  state: z.enum(["healthy", "degraded", "offline"]),
+  codex: z.enum(["signed-in", "signed-out", "auth-expired", "missing", "unavailable"]),
+  activeSessions: z.number().int().nonnegative(), version: z.string().min(1),
+});
+export const operatorSnapshotSchema = z.object({
+  activeAgentId: agentIdSchema,
+  activeProjectId: projectIdSchema,
+  agents: z.array(agentSummarySchema),
+  projects: z.array(projectSummarySchema),
+  conversation: conversationSummarySchema,
+  memoryCandidates: z.array(memoryReviewCandidateSchema),
+  learningEvents: z.array(learningEventSchema),
+  runtime: runtimeSummarySchema,
+});
+
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;
@@ -78,4 +110,11 @@ export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
 export type LearningRule = z.infer<typeof learningRuleSchema>;
 export type ConversationBinding = z.infer<typeof conversationBindingSchema>;
 export type ThoraxConfig = z.infer<typeof thoraxConfigSchema>;
-
+export type AgentSummary = z.infer<typeof agentSummarySchema>;
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
+export type MemoryReviewCandidate = z.infer<typeof memoryReviewCandidateSchema>;
+export type LearningEvent = z.infer<typeof learningEventSchema>;
+export type RuntimeSummary = z.infer<typeof runtimeSummarySchema>;
+export type OperatorSnapshot = z.infer<typeof operatorSnapshotSchema>;

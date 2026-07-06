@@ -3,6 +3,7 @@ import {
   agentDefinitionSchema,
   conversationBindingSchema,
   memoryCandidateSchema,
+  operatorSnapshotSchema,
   projectDefinitionSchema,
   thoraxConfigSchema,
 } from "./index.js";
@@ -39,5 +40,15 @@ describe("Thorax contracts", () => {
     expect(conversationBindingSchema.parse({ id: "c1", agentId: "builder", projectId: "thorax", codexThreadId: "t1" }).codexThreadId).toBe("t1");
     expect(memoryCandidateSchema.parse({ id: "m1", content: "Use TDD", scope: "project", status: "pending", evidence: [{ conversationId: "c1", excerpt: "Test first" }] }).status).toBe("pending");
   });
-});
 
+  it("validates the shared loopback operator payload", () => {
+    expect(operatorSnapshotSchema.parse({
+      activeAgentId: "builder", activeProjectId: "thorax",
+      agents: [{ id: "builder", name: "Builder", role: "Build", state: "ready" }],
+      projects: [{ id: "thorax", name: "Thorax", rootPath: "C:/thorax" }],
+      conversation: { id: "c1", messages: [] }, memoryCandidates: [], learningEvents: [],
+      runtime: { state: "healthy", codex: "signed-in", activeSessions: 1, version: "test" },
+    }).activeAgentId).toBe("builder");
+    expect(() => operatorSnapshotSchema.parse({ activeAgentId: "builder" })).toThrow();
+  });
+});

@@ -10,6 +10,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w @thorax/server",
+    "dev:web": "npm run dev -w @thorax/desktop-web",
+    "start": "npm run start -w @thorax/server",
     "test": "npm run test --workspaces --if-present",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces --if-present",

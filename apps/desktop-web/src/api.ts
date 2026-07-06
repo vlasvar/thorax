@@ -1,56 +1,21 @@
-import type { AgentDefinition, MemoryScope, ProjectDefinition } from "@thorax/shared-types";
-
-export type AgentSummary = Pick<AgentDefinition, "id" | "name"> & {
-  role: string;
-  state: "ready" | "working" | "offline";
-};
-
-export type ProjectSummary = Pick<ProjectDefinition, "id" | "name" | "rootPath">;
-
-export interface ConversationMessage {
-  id: string;
-  author: "operator" | string;
-  content: string;
-  createdAt: string;
-}
-
-export interface ConversationSummary {
-  id: string;
-  messages: ConversationMessage[];
-}
-
-export interface MemoryReviewCandidate {
-  id: string;
-  content: string;
-  scope: MemoryScope;
-  source: string;
-  createdAt: string;
-}
-
-export interface LearningEvent {
-  id: string;
-  title: string;
-  detail: string;
-  createdAt: string;
-}
-
-export interface RuntimeSummary {
-  state: "healthy" | "degraded" | "offline";
-  codex: "signed-in" | "signed-out" | "auth-expired" | "missing" | "unavailable";
-  activeSessions: number;
-  version: string;
-}
-
-export interface OperatorSnapshot {
-  activeAgentId: string;
-  activeProjectId: string;
-  agents: AgentSummary[];
-  projects: ProjectSummary[];
-  conversation: ConversationSummary;
-  memoryCandidates: MemoryReviewCandidate[];
-  learningEvents: LearningEvent[];
-  runtime: RuntimeSummary;
-}
+import {
+  conversationMessageSchema,
+  conversationSummarySchema,
+  operatorSnapshotSchema,
+  type ConversationMessage,
+  type ConversationSummary,
+  type OperatorSnapshot,
+} from "@thorax/shared-types";
+export type {
+  AgentSummary,
+  ConversationMessage,
+  ConversationSummary,
+  LearningEvent,
+  MemoryReviewCandidate,
+  OperatorSnapshot,
+  ProjectSummary,
+  RuntimeSummary,
+} from "@thorax/shared-types";
 
 export interface OperatorApi {
   loadSnapshot(): Promise<OperatorSnapshot>;
@@ -59,33 +24,34 @@ export interface OperatorApi {
   sendMessage(conversationId: string, agentId: string, projectId: string, content: string): Promise<ConversationMessage>;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
-  });
+interface Parser<T> { parse(value: unknown): T }
 
-  if (!response.ok) {
-    throw new Error(`Thorax request failed (${response.status})`);
-  }
-
+async function request<T>(baseUrl: string, path: string, parser: Parser<T> | undefined, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("content-type", "application/json");
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers: Object.fromEntries(headers.entries()) });
+  if (!response.ok) throw new Error(`Thorax request failed (${response.status})`);
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const value: unknown = await response.json();
+  return parser ? parser.parse(value) : value as T;
 }
 
-export const operatorApi: OperatorApi = {
-  loadSnapshot: () => request<OperatorSnapshot>("/api/operator/snapshot"),
-  loadConversation: (agentId, projectId) =>
-    request<ConversationSummary>(`/api/conversations/active?agentId=${encodeURIComponent(agentId)}&projectId=${encodeURIComponent(projectId)}`),
-  reviewMemory: async (id, decision) => {
-    await request(`/api/memory/candidates/${encodeURIComponent(id)}/review`, {
-      method: "POST",
-      body: JSON.stringify({ decision }),
-    });
-  },
-  sendMessage: (conversationId, agentId, projectId, content) =>
-    request<ConversationMessage>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-      method: "POST",
-      body: JSON.stringify({ agentId, projectId, content }),
-    }),
-};
+export function createOperatorApi(baseUrl = ""): OperatorApi {
+  const normalized = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  return {
+    loadSnapshot: () => request(normalized, "/api/operator/snapshot", operatorSnapshotSchema),
+    loadConversation: (agentId, projectId) =>
+      request(normalized, `/api/conversations/active?agentId=${encodeURIComponent(agentId)}&projectId=${encodeURIComponent(projectId)}`, conversationSummarySchema),
+    reviewMemory: async (id, decision) => {
+      await request(normalized, `/api/memory/candidates/${encodeURIComponent(id)}/review`, undefined, {
+        method: "POST", body: JSON.stringify({ decision }),
+      });
+    },
+    sendMessage: (conversationId, agentId, projectId, content) =>
+      request(normalized, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, conversationMessageSchema, {
+        method: "POST", body: JSON.stringify({ agentId, projectId, content }),
+      }),
+  };
+}
+
+export const operatorApi = createOperatorApi();

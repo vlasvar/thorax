@@ -1,0 +1,21 @@
+{
+  "name": "@thorax/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@thorax/codex-bridge": "0.1.0",
+    "@thorax/core": "0.1.0",
+    "@thorax/memory-engine": "0.1.0",
+    "@thorax/shared-types": "0.1.0"
+  },
+  "devDependencies": { "tsx": "^4.20.3" }
+}
