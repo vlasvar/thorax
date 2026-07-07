@@ -2,9 +2,13 @@ import {
   conversationMessageSchema,
   conversationSummarySchema,
   operatorSnapshotSchema,
+  adapterDryRunResultSchema,
+  adapterCommitResultSchema,
   type ConversationMessage,
   type ConversationSummary,
   type OperatorSnapshot,
+  type AdapterDryRunResult,
+  type AdapterCommitResult,
 } from "@thorax/shared-types";
 export type {
   AgentSummary,
@@ -15,6 +19,8 @@ export type {
   OperatorSnapshot,
   ProjectSummary,
   RuntimeSummary,
+  AdapterDryRunResult,
+  AdapterCommitResult,
 } from "@thorax/shared-types";
 
 export interface OperatorApi {
@@ -22,6 +28,7 @@ export interface OperatorApi {
   loadConversation(agentId: string, projectId: string): Promise<ConversationSummary>;
   reviewMemory(id: string, decision: "approve" | "reject"): Promise<void>;
   sendMessage(conversationId: string, agentId: string, projectId: string, content: string): Promise<ConversationMessage>;
+  executeAdapterAction(request: { adapterId: string; action: string; input: Record<string, unknown>; mode: "dry_run" | "commit"; approved_by?: string }): Promise<AdapterDryRunResult | AdapterCommitResult>;
 }
 
 interface Parser<T> { parse(value: unknown): T }
@@ -50,6 +57,16 @@ export function createOperatorApi(baseUrl = ""): OperatorApi {
     sendMessage: (conversationId, agentId, projectId, content) =>
       request(normalized, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, conversationMessageSchema, {
         method: "POST", body: JSON.stringify({ agentId, projectId, content }),
+      }),
+    executeAdapterAction: (reqBody) =>
+      request(normalized, "/api/adapter/execute", {
+        parse: (val) => {
+          const parsedDry = adapterDryRunResultSchema.safeParse(val);
+          if (parsedDry.success) return parsedDry.data;
+          return adapterCommitResultSchema.parse(val);
+        }
+      }, {
+        method: "POST", body: JSON.stringify(reqBody),
       }),
   };
 }

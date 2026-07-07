@@ -42,6 +42,28 @@ export const adapterManifestSchema = z.object({
   actions: z.array(adapterActionSchema).min(1),
 });
 
+export const adapterDryRunResultSchema = z.object({
+  mode: z.literal("dry_run"),
+  diff_preview: z.string(),
+  would_affect: z.array(z.string()),
+  reversible: z.boolean(),
+});
+
+export const adapterCommitResultSchema = z.object({
+  mode: z.literal("commit"),
+  result: z.unknown(),
+  transaction_id: z.string().min(1),
+  rollback_token: z.string().optional(),
+});
+
+export const adapterExecuteRequestSchema = z.object({
+  adapterId: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  action: z.string().regex(/^[a-z][a-z0-9_]*/),
+  input: z.record(z.unknown()),
+  mode: z.enum(["dry_run", "commit"]),
+  approved_by: z.string().optional(),
+});
+
 export const agentDefinitionSchema = z.object({
   id: agentIdSchema,
   name: z.string().min(1),
@@ -147,6 +169,9 @@ export type Skill = z.infer<typeof skillSchema>;
 export type AdapterRiskTier = z.infer<typeof adapterRiskTierSchema>;
 export type AdapterAction = z.infer<typeof adapterActionSchema>;
 export type AdapterManifest = z.infer<typeof adapterManifestSchema>;
+export type AdapterDryRunResult = z.infer<typeof adapterDryRunResultSchema>;
+export type AdapterCommitResult = z.infer<typeof adapterCommitResultSchema>;
+export type AdapterExecuteRequest = z.infer<typeof adapterExecuteRequestSchema>;
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;

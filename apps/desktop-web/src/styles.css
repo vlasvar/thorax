@@ -37,3 +37,54 @@ select { min-width: 190px; height: 50px; padding: 20px 34px 5px 12px; color: #dc
 .skill-badge { padding: 3px 8px; border-radius: 4px; color: #80dd9f; background: #14221a; border: 1px solid #294233; font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
 .agent-skills-inline { display: block; margin-top: 3px; color: #55665c; font-size: 8px; font-family: "DM Mono", monospace; }
 
+/* Modal backdrop and content */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+}
+.modal-content {
+  background: #101614;
+  border: 1px solid #28322e;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-content h2 {
+  margin-top: 0;
+  color: #85e7a8;
+}
+.diff-preview {
+  background: #080c0b;
+  border: 1px solid #202925;
+  border-radius: 6px;
+  padding: 14px;
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: #cbd5cf;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 16px 0;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.toast-success {
+  margin: 12px 20px 0;
+  padding: 10px 14px;
+  border: 1px solid #376a49;
+  border-radius: 6px;
+  background: #142c1d;
+  color: #90e4ad;
+  font-size: 12px;
+}
+
+

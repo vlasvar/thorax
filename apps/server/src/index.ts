@@ -4,9 +4,10 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { CodexEvent, CodexHealth, RunTurnOptions } from "@thorax/codex-bridge";
-import { AgentRegistry, ConversationStore, LearningPipeline, SkillRegistry, defaultAgents, extractLearning, type StoredConversation, type StoredMessage } from "@thorax/core";
+import { AgentRegistry, ConversationStore, LearningPipeline, SkillRegistry, AdapterRegistry, DispatchRegistry, ApprovalRequiredError, UnknownActionError, UnknownAdapterError, defaultAgents, extractLearning, type StoredConversation, type StoredMessage } from "@thorax/core";
 import { MemoryEngine } from "@thorax/memory-engine";
-import { conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, type ProjectDefinition, type Skill } from "@thorax/shared-types";
+import { adapterExecuteRequestSchema, conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, type AdapterCommitResult, type AdapterDryRunResult, type ProjectDefinition, type Skill } from "@thorax/shared-types";
+import { ExcelAdapter } from "@thorax/excel-adapter";
 
 export interface RuntimePort {
   health(): Promise<CodexHealth>;
@@ -24,6 +25,8 @@ export interface Logger { write(entry: LogEntry): void }
 export class ThoraxService {
   readonly #registry: AgentRegistry;
   readonly #skills: SkillRegistry;
+  readonly #adapters: AdapterRegistry;
+  readonly #dispatch: DispatchRegistry;
   readonly #learning: LearningPipeline;
   readonly #locks = new Map<string, Promise<unknown>>();
   readonly #healthCacheTtlMs = 10_000;
@@ -36,9 +39,16 @@ export class ThoraxService {
     private readonly conversations: ConversationStore,
     private readonly memory: MemoryEngine,
     skills: SkillRegistry,
+    adapters: AdapterRegistry,
   ) {
     this.#registry = new AgentRegistry(defaultAgents.map((agent) => ({ ...agent, projectAccess: [project.id] })));
     this.#skills = skills;
+    this.#adapters = adapters;
+    this.#dispatch = new DispatchRegistry();
+    const excelManifest = this.#adapters.get("excel");
+    if (excelManifest) {
+      this.#dispatch.register(excelManifest, new ExcelAdapter());
+    }
     this.#learning = new LearningPipeline(memory);
   }
 
@@ -52,7 +62,8 @@ export class ThoraxService {
     const conversations = await ConversationStore.open(join(options.dataDirectory, "conversations.json"));
     const memory = await MemoryEngine.open({ dataDirectory: join(options.dataDirectory, "memory") });
     const skills = await SkillRegistry.load(options.project.rootPath);
-    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory, skills);
+    const adapters = await AdapterRegistry.load(options.project.rootPath);
+    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory, skills, adapters);
   }
 
   close(): void { this.memory.close(); }
@@ -91,6 +102,25 @@ export class ThoraxService {
     this.#registry.requireAccess(agentId, projectId);
     if (projectId !== this.project.id) throw new InputError("Unknown project.");
     return conversationSummarySchema.parse(publicConversation(await this.conversations.getOrCreate(agentId, projectId)));
+  }
+
+  /** Register a live adapter port so dispatch can route to it. */
+  registerAdapter(manifest: import("@thorax/shared-types").AdapterManifest, port: import("@thorax/core").AdapterPort): void {
+    this.#dispatch.register(manifest, port);
+  }
+
+  async executeAdapterAction(request: import("@thorax/shared-types").AdapterExecuteRequest): Promise<AdapterDryRunResult | AdapterCommitResult> {
+    const manifest = this.#adapters.get(request.adapterId);
+    if (!manifest) throw new InputError(`No adapter manifest loaded for '${request.adapterId}'.`);
+    if (!this.#dispatch.has(request.adapterId)) throw new InputError(`Adapter '${request.adapterId}' has a manifest but no registered port. Is the adapter package loaded?`);
+    try {
+      return await this.#dispatch.dispatch(request);
+    } catch (error) {
+      if (error instanceof ApprovalRequiredError || error instanceof UnknownActionError || error instanceof UnknownAdapterError) {
+        throw new InputError((error as any).message);
+      }
+      throw error;
+    }
   }
 
   async reviewMemory(id: string, decision: "approve" | "reject"): Promise<void> {
@@ -200,6 +230,12 @@ async function route(service: ThoraxService, request: IncomingMessage, response:
       if (decision !== "approve" && decision !== "reject") throw new InputError("Decision must be approve or reject.");
       await service.reviewMemory(decodeURIComponent(reviewMatch[1]!), decision);
       response.writeHead(204).end(); return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/adapter/execute") {
+      const body = await readJson(request);
+      const parseResult = adapterExecuteRequestSchema.safeParse(body);
+      if (!parseResult.success) throw new InputError(`Invalid adapter execute request: ${parseResult.error.issues.map((i: any) => i.message).join(", ")}`);
+      return json(response, 200, await service.executeAdapterAction(parseResult.data));
     }
     json(response, 404, { error: "Not found" });
   } catch (error) {

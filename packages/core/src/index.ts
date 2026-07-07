@@ -14,6 +14,7 @@ export const defaultAgents: readonly AgentDefinition[] = [
 
 export { defaultSkills, SkillRegistry } from "./skills.js";
 export { AdapterRegistry } from "./adapters.js";
+export { DispatchRegistry, FakeAdapter, ApprovalRequiredError, UnknownActionError, UnknownAdapterError, type AdapterPort, type DispatchRequest, type FakeAdapterCall, type FakeAdapterOptions } from "./dispatch.js";
 
 export class AgentRegistry {
   readonly #agents: Map<string, AgentDefinition>;

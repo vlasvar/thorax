@@ -3,6 +3,7 @@
   "compilerOptions": { "composite": true, "rootDir": "src", "outDir": "dist" },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../shared-types" }
+    { "path": "../shared-types" },
+    { "path": "../core" }
   ]
 }

@@ -26,10 +26,44 @@ class FakeRuntime {
 
 async function fixture() {
   const dataDirectory = await mkdtemp(join(tmpdir(), "thorax-server-")); dirs.push(dataDirectory);
+  const rootPath = await mkdtemp(join(tmpdir(), "thorax-project-")); dirs.push(rootPath);
+
+  // Write adapter manifest inside the temporary project root
+  const adaptersDir = join(rootPath, ".thorax", "adapters");
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(adaptersDir, { recursive: true }));
+  await import("node:fs/promises").then(({ writeFile }) => writeFile(
+    join(adaptersDir, "excel.json"),
+    JSON.stringify({
+      adapter: "excel",
+      version: "1.0.0",
+      description: "Excel manifest for tests",
+      auth: { type: "none" },
+      actions: [
+        {
+          name: "append_lease_row",
+          risk_tier: "write_reversible",
+          description: "Append row",
+          input_schema: {},
+          output_schema: {},
+          dry_run_supported: true
+        },
+        {
+          name: "update_lease_row",
+          risk_tier: "write_irreversible",
+          description: "Update row",
+          input_schema: {},
+          output_schema: {},
+          dry_run_supported: true
+        }
+      ]
+    }),
+    "utf8"
+  ));
+
   const runtime = new FakeRuntime();
-  const service = await ThoraxService.open({ dataDirectory, runtime, project: { id: "thorax", name: "Thorax", rootPath: process.cwd() } });
+  const service = await ThoraxService.open({ dataDirectory, runtime, project: { id: "thorax", name: "Thorax", rootPath } });
   stops.push(async () => { service.close(); });
-  return { service, runtime, dataDirectory };
+  return { service, runtime, dataDirectory, rootPath };
 }
 
 describe("Thorax service", () => {
@@ -75,5 +109,42 @@ describe("Thorax service", () => {
     const invalid = await fetch(`${running.url}/api/conversations/${snapshot.conversation.id}/messages`, { method: "POST", body: "{}" });
     expect(invalid.status).toBe(400);
     expect(logs).toContainEqual(expect.objectContaining({ level: "warn", status: 400 }));
+  });
+
+  it("exposes the /api/adapter/execute endpoint for dry-run and commit execution", async () => {
+    const { service, rootPath } = await fixture();
+    const running = await startThoraxServer(service, { host: "127.0.0.1", port: 0 });
+    stops.push(running.close);
+
+    const workbookPath = join(rootPath, "leases.xlsx");
+
+    const dryRunRes = await fetch(`${running.url}/api/adapter/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        adapterId: "excel",
+        action: "append_lease_row",
+        input: { workbook_path: workbookPath, row: { lease_id: "L1", tenant: "Bob" } },
+        mode: "dry_run"
+      }),
+    });
+    expect(dryRunRes.status).toBe(200);
+    const dryRunBody = await dryRunRes.json() as any;
+    expect(dryRunBody.mode).toBe("dry_run");
+    expect(dryRunBody.diff_preview).toContain("+ Row 2: lease_id: L1, tenant: Bob");
+
+    const commitFailRes = await fetch(`${running.url}/api/adapter/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        adapterId: "excel",
+        action: "update_lease_row",
+        input: { workbook_path: workbookPath, lease_id: "L1", updates: { rent: 2000 } },
+        mode: "commit"
+      }),
+    });
+    expect(commitFailRes.status).toBe(400);
+    const errBody = await commitFailRes.json() as any;
+    expect(errBody.error).toContain("requires explicit approval");
   });
 });

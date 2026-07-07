@@ -38,6 +38,7 @@ function api(overrides: Partial<OperatorApi> = {}): OperatorApi {
     loadConversation: vi.fn().mockResolvedValue(snapshot.conversation),
     reviewMemory: vi.fn().mockResolvedValue(undefined),
     sendMessage: vi.fn(),
+    executeAdapterAction: vi.fn(),
     ...overrides,
   };
 }
@@ -256,5 +257,42 @@ describe("operator shell", () => {
     render(<App api={api({ loadSnapshot: vi.fn().mockResolvedValue({ ...snapshot, runtime: { ...snapshot.runtime, state: "offline", codex } }) })} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(guidance);
+  });
+
+  it("shows dry-run diff preview in modal, cancel closes it, approve commits it", async () => {
+    const executeAdapterAction = vi.fn()
+      .mockResolvedValueOnce({ mode: "dry_run", diff_preview: "+ Row 42: Bob", would_affect: [], reversible: true })
+      .mockResolvedValueOnce({ mode: "commit", result: {}, transaction_id: "txn-123" });
+
+    const client = api({ executeAdapterAction });
+    const user = userEvent.setup();
+    render(<App api={client} />);
+
+    // Click Append button
+    const appendBtn = await screen.findByRole("button", { name: "Append (Alice)" });
+    await user.click(appendBtn);
+
+    // Verify executeAdapterAction called with dry_run
+    expect(executeAdapterAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: "append_lease_row",
+      mode: "dry_run"
+    }));
+
+    // Verify modal is shown with diff preview
+    expect(await screen.findByText("+ Row 42: Bob")).toBeInTheDocument();
+
+    // Click Approve button
+    const approveBtn = screen.getByRole("button", { name: "Approve & Commit" });
+    await user.click(approveBtn);
+
+    // Verify executeAdapterAction called with commit
+    expect(executeAdapterAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: "append_lease_row",
+      mode: "commit",
+      approved_by: "operator"
+    }));
+
+    // Verify success toast shows transaction ID
+    expect(await screen.findByText(/Action committed successfully! Tx ID: txn-123/)).toBeInTheDocument();
   });
 });

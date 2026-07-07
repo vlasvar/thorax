@@ -38,6 +38,12 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
   const [reviewed, setReviewed] = useState<Record<string, "approved" | "rejected">>({});
   const [reviewErrors, setReviewErrors] = useState<Record<string, boolean>>({});
   const [reviewPending, setReviewPending] = useState<Record<string, boolean>>({});
+  const [modalOpen, setModalOpen] = useState(false);
+  const [diffPreview, setDiffPreview] = useState("");
+  const [currentRequest, setCurrentRequest] = useState<{ adapterId: string; action: string; input: Record<string, unknown> } | null>(null);
+  const [executing, setExecuting] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [adapterError, setAdapterError] = useState("");
   const reviewInFlight = useRef(new Set<string>());
   const bindingRequest = useRef(0);
   const snapshotRequest = useRef(0);
@@ -152,6 +158,56 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
     }
   }
 
+  const testWorkbookPath = useMemo(() => {
+    const proj = snapshot?.projects.find((p) => p.id === projectId);
+    return proj ? `${proj.rootPath}/leases.xlsx` : "leases.xlsx";
+  }, [snapshot, projectId]);
+
+  async function triggerDryRun(action: string, input: Record<string, unknown>) {
+    setAdapterError("");
+    setExecuting(true);
+    try {
+      const res = await api.executeAdapterAction({
+        adapterId: "excel",
+        action,
+        input,
+        mode: "dry_run"
+      });
+      if (res.mode === "dry_run") {
+        setDiffPreview(res.diff_preview);
+        setCurrentRequest({ adapterId: "excel", action, input });
+        setModalOpen(true);
+      }
+    } catch (err) {
+      setAdapterError(err instanceof Error ? err.message : "Adapter execution failed.");
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  async function approveCommit() {
+    if (!currentRequest) return;
+    setAdapterError("");
+    setExecuting(true);
+    try {
+      const res = await api.executeAdapterAction({
+        ...currentRequest,
+        mode: "commit",
+        approved_by: "operator"
+      });
+      if (res.mode === "commit") {
+        setToastMessage(`Action committed successfully! Tx ID: ${res.transaction_id}`);
+        setModalOpen(false);
+        setCurrentRequest(null);
+        setTimeout(() => setToastMessage(""), 5000);
+      }
+    } catch (err) {
+      setAdapterError(err instanceof Error ? err.message : "Commit execution failed.");
+    } finally {
+      setExecuting(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="state-page">
@@ -222,6 +278,11 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
               )}
             </div>
           </div>
+          {toastMessage && (
+            <div className="toast-success" role="status">
+              {toastMessage}
+            </div>
+          )}
           <div className="message-list" aria-live="polite">
             {conversationLoading ? <p className="empty-state" role="status">Loading bound conversation...</p> : conversationError ? <p className="inline-error" role="alert">Could not load this conversation. Change context to retry.</p> : visibleMessages.length === 0 ? <EmptyState>Start a conversation with the selected agent.</EmptyState> : visibleMessages.map((message) => (
               <article className={`message message--${message.author === "operator" ? "operator" : "agent"}${pendingOperatorMessage?.id === message.id ? " message--pending" : ""}`} key={message.id}>
@@ -276,6 +337,63 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
           </section>
         </aside>
 
+        <section className="panel adapter-panel" aria-labelledby="adapter-title">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">HUMAN IN THE LOOP</span>
+              <h2 id="adapter-title">Adapter actions</h2>
+            </div>
+            {executing && <span className="count">Executing...</span>}
+          </div>
+          <div className="review-list">
+            <article className="review-card">
+              <div className="review-meta">
+                <span className="scope-tag">write_reversible</span>
+                <span>excel</span>
+              </div>
+              <p>Append a new lease row to tracking sheet.</p>
+              <div className="review-actions">
+                <button
+                  className="button button--secondary"
+                  disabled={executing}
+                  onClick={() =>
+                    triggerDryRun("append_lease_row", {
+                      workbook_path: testWorkbookPath,
+                      row: { lease_id: "L1", tenant: "Alice", start_date: "2026-08-01", rent: 1500 },
+                    })
+                  }
+                >
+                  Append (Alice)
+                </button>
+              </div>
+            </article>
+
+            <article className="review-card">
+              <div className="review-meta">
+                <span className="scope-tag">write_irreversible</span>
+                <span>excel</span>
+              </div>
+              <p>Update lease row L1 (increase rent).</p>
+              <div className="review-actions">
+                <button
+                  className="button button--secondary"
+                  disabled={executing}
+                  onClick={() =>
+                    triggerDryRun("update_lease_row", {
+                      workbook_path: testWorkbookPath,
+                      lease_id: "L1",
+                      updates: { rent: 2000 },
+                    })
+                  }
+                >
+                  Update (L1 Rent)
+                </button>
+              </div>
+            </article>
+          </div>
+          {adapterError && <p className="inline-error" style={{ margin: "0 16px 16px" }} role="alert">{adapterError}</p>}
+        </section>
+
         <section className="panel memory-panel" aria-labelledby="memory-title">
           <div className="panel-heading"><div><span className="eyebrow">HUMAN IN THE LOOP</span><h2 id="memory-title">Memory review</h2></div><span className="count">{pendingMemoryCount}</span></div>
           <div className="review-list">
@@ -308,6 +426,24 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
           )}
         </section>
       </main>
+
+      {modalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <div className="modal-content">
+            <h2 id="modal-title">Confirm Adapter Action</h2>
+            <p>Please review the dry-run diff preview below before approving:</p>
+            <pre className="diff-preview">{diffPreview}</pre>
+            <div className="modal-actions">
+              <button className="button button--quiet" onClick={() => setModalOpen(false)}>
+                Reject / Cancel
+              </button>
+              <button className="button button--primary" onClick={approveCommit} disabled={executing}>
+                {executing ? "Approving..." : "Approve & Commit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
