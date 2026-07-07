@@ -147,4 +147,63 @@ describe("Thorax service", () => {
     const errBody = await commitFailRes.json() as any;
     expect(errBody.error).toContain("requires explicit approval");
   });
+
+  it("supports triggering, listing, and resuming workflows via REST endpoints", async () => {
+    const { service, rootPath } = await fixture();
+    const running = await startThoraxServer(service, { host: "127.0.0.1", port: 0 });
+    stops.push(running.close);
+
+    const workbookPath = join(rootPath, "leases.xlsx");
+
+    const workflowDef = {
+      id: "test-run",
+      version: "1.0.0",
+      description: "Test workflow",
+      trigger: { type: "schedule", value: "manual" },
+      steps: [
+        {
+          id: "step1",
+          type: "action",
+          adapter: "excel",
+          action: "update_lease_row",
+          input: { workbook_path: workbookPath, lease_id: "L1", updates: { rent: 2000 } }
+        }
+      ]
+    };
+
+    // Trigger workflow
+    const triggerRes = await fetch(`${running.url}/api/workflows/trigger`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        definition: workflowDef,
+        context: {}
+      }),
+    });
+    expect(triggerRes.status).toBe(200);
+    const triggerBody = await triggerRes.json() as any;
+    expect(["running", "suspended"]).toContain(triggerBody.status);
+
+    // Let it run and suspend on update_lease_row (write_irreversible)
+    await new Promise((r) => setTimeout(r, 80));
+
+    // List executions
+    const listRes = await fetch(`${running.url}/api/workflows/executions`);
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json() as any[];
+    const active = listBody.find((x) => x.id === triggerBody.id);
+    expect(active).toBeDefined();
+    expect(active.status).toBe("suspended");
+
+    // Reject execution
+    const rejectRes = await fetch(`${running.url}/api/workflows/executions/${active.id}/reject`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ definition: workflowDef }),
+    });
+    expect(rejectRes.status).toBe(200);
+    const rejectBody = await rejectRes.json() as any;
+    expect(rejectBody.status).toBe("failed");
+    expect(rejectBody.stepLogs.at(-1).error).toContain("rejected by operator");
+  });
 });

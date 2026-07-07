@@ -29,6 +29,9 @@ export interface OperatorApi {
   reviewMemory(id: string, decision: "approve" | "reject"): Promise<void>;
   sendMessage(conversationId: string, agentId: string, projectId: string, content: string): Promise<ConversationMessage>;
   executeAdapterAction(request: { adapterId: string; action: string; input: Record<string, unknown>; mode: "dry_run" | "commit"; approved_by?: string }): Promise<AdapterDryRunResult | AdapterCommitResult>;
+  triggerWorkflow(definition: any, context: Record<string, unknown>): Promise<any>;
+  resumeWorkflow(executionId: string, definition: any, approved: boolean): Promise<any>;
+  listWorkflowExecutions(): Promise<any[]>;
 }
 
 interface Parser<T> { parse(value: unknown): T }
@@ -68,6 +71,16 @@ export function createOperatorApi(baseUrl = ""): OperatorApi {
       }, {
         method: "POST", body: JSON.stringify(reqBody),
       }),
+    triggerWorkflow: (definition, context) =>
+      request(normalized, "/api/workflows/trigger", undefined, {
+        method: "POST", body: JSON.stringify({ definition, context }),
+      }),
+    resumeWorkflow: (executionId, definition, approved) =>
+      request(normalized, `/api/workflows/executions/${encodeURIComponent(executionId)}/${approved ? "approve" : "reject"}`, undefined, {
+        method: "POST", body: JSON.stringify({ definition }),
+      }),
+    listWorkflowExecutions: () =>
+      request(normalized, "/api/workflows/executions", undefined),
   };
 }
 

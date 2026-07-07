@@ -16,7 +16,8 @@
     "@thorax/core": "0.1.0",
     "@thorax/excel-adapter": "0.1.0",
     "@thorax/memory-engine": "0.1.0",
-    "@thorax/shared-types": "0.1.0"
+    "@thorax/shared-types": "0.1.0",
+    "@thorax/workflow-engine": "0.1.0"
   },
   "devDependencies": { "tsx": "^4.20.3" }
 }

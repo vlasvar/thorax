@@ -6,8 +6,9 @@ import type { AddressInfo } from "node:net";
 import type { CodexEvent, CodexHealth, RunTurnOptions } from "@thorax/codex-bridge";
 import { AgentRegistry, ConversationStore, LearningPipeline, SkillRegistry, AdapterRegistry, DispatchRegistry, ApprovalRequiredError, UnknownActionError, UnknownAdapterError, defaultAgents, extractLearning, type StoredConversation, type StoredMessage } from "@thorax/core";
 import { MemoryEngine } from "@thorax/memory-engine";
-import { adapterExecuteRequestSchema, conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, type AdapterCommitResult, type AdapterDryRunResult, type ProjectDefinition, type Skill } from "@thorax/shared-types";
+import { adapterExecuteRequestSchema, conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, workflowDefinitionSchema, workflowExecutionSchema, type AdapterCommitResult, type AdapterDryRunResult, type ProjectDefinition, type Skill, type WorkflowExecution } from "@thorax/shared-types";
 import { ExcelAdapter } from "@thorax/excel-adapter";
+import { ExecutionStateStore, WorkflowEngine } from "@thorax/workflow-engine";
 
 export interface RuntimePort {
   health(): Promise<CodexHealth>;
@@ -28,6 +29,8 @@ export class ThoraxService {
   readonly #adapters: AdapterRegistry;
   readonly #dispatch: DispatchRegistry;
   readonly #learning: LearningPipeline;
+  readonly #stateStore: ExecutionStateStore;
+  readonly #engine: WorkflowEngine;
   readonly #locks = new Map<string, Promise<unknown>>();
   readonly #healthCacheTtlMs = 10_000;
   #cachedHealth: { value: CodexHealth; expiresAt: number } | undefined;
@@ -40,6 +43,7 @@ export class ThoraxService {
     private readonly memory: MemoryEngine,
     skills: SkillRegistry,
     adapters: AdapterRegistry,
+    stateStore: ExecutionStateStore,
   ) {
     this.#registry = new AgentRegistry(defaultAgents.map((agent) => ({ ...agent, projectAccess: [project.id] })));
     this.#skills = skills;
@@ -50,6 +54,40 @@ export class ThoraxService {
       this.#dispatch.register(excelManifest, new ExcelAdapter());
     }
     this.#learning = new LearningPipeline(memory);
+    this.#stateStore = stateStore;
+
+    const agentRunner = {
+      runTurn: async (agentId: string, prompt: string) => {
+        const agent = this.#registry.requireAccess(agentId, this.project.id);
+        const activeSkills = (agent.skills ?? [])
+          .map((id) => this.#skills.get(id))
+          .filter((s): s is Skill => !!s);
+
+        let skillsSection = "";
+        if (activeSkills.length > 0) {
+          skillsSection = "\n\nActive Capabilities:\n" + activeSkills.map((skill) => {
+            const rulesStr = skill.rules.map((r) => `- ${r}`).join("\n");
+            return `### Skill: ${skill.name} (${skill.id})\n${skill.systemPrompt}\nGuidelines:\n${rulesStr}`;
+          }).join("\n\n");
+        }
+
+        const fullPrompt = `${agent.instructions}${skillsSection}\n\nProject: ${this.project.name}\nProject root: ${this.project.rootPath}\n\nTask:\n${prompt}`;
+        
+        let response = "";
+        let completed = false;
+        for await (const event of this.runtime.runTurn({ prompt: fullPrompt, cwd: this.project.rootPath })) {
+          if (event.type === "message.delta") response += event.delta;
+          else if (event.type === "turn.completed") {
+            if (event.status === "failed") throw new Error("Agent workflow turn failed.");
+            completed = true;
+          }
+        }
+        if (!completed) throw new Error("Agent workflow turn ended without completion.");
+        return response;
+      }
+    };
+
+    this.#engine = new WorkflowEngine(this.#stateStore, this.#adapters, this.#dispatch, agentRunner);
   }
 
   static async open(options: ThoraxServiceOptions): Promise<ThoraxService> {
@@ -63,10 +101,14 @@ export class ThoraxService {
     const memory = await MemoryEngine.open({ dataDirectory: join(options.dataDirectory, "memory") });
     const skills = await SkillRegistry.load(options.project.rootPath);
     const adapters = await AdapterRegistry.load(options.project.rootPath);
-    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory, skills, adapters);
+    const stateStore = new ExecutionStateStore(options.dataDirectory);
+    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory, skills, adapters, stateStore);
   }
 
-  close(): void { this.memory.close(); }
+  close(): void {
+    this.memory.close();
+    this.#stateStore.close();
+  }
 
   async snapshot() {
     const health = await this.#health();
@@ -121,6 +163,18 @@ export class ThoraxService {
       }
       throw error;
     }
+  }
+
+  async triggerWorkflow(definition: import("@thorax/shared-types").WorkflowDefinition, initialContext: Record<string, unknown>) {
+    return this.#engine.start(definition, initialContext);
+  }
+
+  async resumeWorkflow(executionId: string, definition: import("@thorax/shared-types").WorkflowDefinition, approved: boolean) {
+    return this.#engine.resumeWithDefinition(executionId, definition, approved);
+  }
+
+  listWorkflowExecutions() {
+    return this.#stateStore.listAll();
   }
 
   async reviewMemory(id: string, decision: "approve" | "reject"): Promise<void> {
@@ -236,6 +290,27 @@ async function route(service: ThoraxService, request: IncomingMessage, response:
       const parseResult = adapterExecuteRequestSchema.safeParse(body);
       if (!parseResult.success) throw new InputError(`Invalid adapter execute request: ${parseResult.error.issues.map((i: any) => i.message).join(", ")}`);
       return json(response, 200, await service.executeAdapterAction(parseResult.data));
+    }
+    if (request.method === "GET" && url.pathname === "/api/workflows/executions") {
+      return json(response, 200, service.listWorkflowExecutions());
+    }
+    if (request.method === "POST" && url.pathname === "/api/workflows/trigger") {
+      const body = await readJson(request);
+      const definition = workflowDefinitionSchema.parse(body.definition);
+      const context = (body.context as Record<string, unknown>) ?? {};
+      return json(response, 200, await service.triggerWorkflow(definition, context));
+    }
+    const approveMatch = /^\/api\/workflows\/executions\/([^/]+)\/approve$/.exec(url.pathname);
+    if (request.method === "POST" && approveMatch) {
+      const body = await readJson(request);
+      const definition = workflowDefinitionSchema.parse(body.definition);
+      return json(response, 200, await service.resumeWorkflow(decodeURIComponent(approveMatch[1]!), definition, true));
+    }
+    const rejectMatch = /^\/api\/workflows\/executions\/([^/]+)\/reject$/.exec(url.pathname);
+    if (request.method === "POST" && rejectMatch) {
+      const body = await readJson(request);
+      const definition = workflowDefinitionSchema.parse(body.definition);
+      return json(response, 200, await service.resumeWorkflow(decodeURIComponent(rejectMatch[1]!), definition, false));
     }
     json(response, 404, { error: "Not found" });
   } catch (error) {

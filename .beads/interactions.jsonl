@@ -25,3 +25,4 @@
 {"id":"int-e4acb920c448c05b4ace36c5c1d37f21","kind":"field_change","created_at":"2026-07-07T07:20:12.5369924Z","actor":"vlasvar","issue_id":"thorax-f0u","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-51ca58158978f02dca7b72b50c4b466c","kind":"field_change","created_at":"2026-07-07T07:20:14.2051422Z","actor":"vlasvar","issue_id":"thorax-1p4","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-3abdf971f8260b8085048c44505af934","kind":"field_change","created_at":"2026-07-07T07:20:16.9607754Z","actor":"vlasvar","issue_id":"thorax-aqu","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-f50be0c48519da6cd0f7b75beec6493a","kind":"field_change","created_at":"2026-07-07T07:29:27.7923285Z","actor":"vlasvar","issue_id":"thorax-d5j","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

@@ -64,6 +64,61 @@ export const adapterExecuteRequestSchema = z.object({
   approved_by: z.string().optional(),
 });
 
+export const workflowTriggerSchema = z.object({
+  type: z.enum(["schedule", "event"]),
+  value: z.string().min(1),
+});
+
+export const workflowStepSchema: z.ZodType<any> = z.lazy(() => z.object({
+  id: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  type: z.enum(["action", "agent_turn", "loop", "conditional"]),
+  adapter: z.string().optional(),
+  action: z.string().optional(),
+  input: z.record(z.unknown()).optional(),
+  output_path: z.string().optional(),
+  agent: z.string().optional(),
+  prompt: z.string().optional(),
+  over: z.string().optional(),
+  item_name: z.string().optional(),
+  steps: z.array(workflowStepSchema).optional(),
+  condition: z.string().optional(),
+  then: z.array(workflowStepSchema).optional(),
+  otherwise: z.array(workflowStepSchema).optional(),
+  retry: z.object({
+    max_attempts: z.number().int().positive(),
+    backoff_ms: z.number().int().nonnegative(),
+  }).optional(),
+}));
+
+export const workflowDefinitionSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  version: z.string().min(1),
+  description: z.string().min(1),
+  trigger: workflowTriggerSchema,
+  context_schema: z.record(z.unknown()).optional(),
+  steps: z.array(workflowStepSchema).min(1),
+});
+
+export const stepExecutionLogSchema = z.object({
+  stepId: z.string(),
+  status: z.enum(["running", "success", "failed", "suspended"]),
+  startedAt: z.string(),
+  completedAt: z.string().optional(),
+  error: z.string().optional(),
+  duration_ms: z.number().optional(),
+});
+
+export const workflowExecutionSchema = z.object({
+  id: z.string().uuid(),
+  workflowId: z.string(),
+  status: z.enum(["running", "suspended", "completed", "failed"]),
+  currentStepId: z.string().optional(),
+  context: z.record(z.unknown()),
+  stepLogs: z.array(stepExecutionLogSchema),
+  updatedAt: z.string(),
+});
+
+
 export const agentDefinitionSchema = z.object({
   id: agentIdSchema,
   name: z.string().min(1),
@@ -172,6 +227,10 @@ export type AdapterManifest = z.infer<typeof adapterManifestSchema>;
 export type AdapterDryRunResult = z.infer<typeof adapterDryRunResultSchema>;
 export type AdapterCommitResult = z.infer<typeof adapterCommitResultSchema>;
 export type AdapterExecuteRequest = z.infer<typeof adapterExecuteRequestSchema>;
+export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;
+export type WorkflowStep = z.infer<typeof workflowStepSchema>;
+export type StepExecutionLog = z.infer<typeof stepExecutionLogSchema>;
+export type WorkflowExecution = z.infer<typeof workflowExecutionSchema>;
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;

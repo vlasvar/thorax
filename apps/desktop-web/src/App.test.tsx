@@ -39,6 +39,9 @@ function api(overrides: Partial<OperatorApi> = {}): OperatorApi {
     reviewMemory: vi.fn().mockResolvedValue(undefined),
     sendMessage: vi.fn(),
     executeAdapterAction: vi.fn(),
+    triggerWorkflow: vi.fn().mockResolvedValue({}),
+    resumeWorkflow: vi.fn().mockResolvedValue({}),
+    listWorkflowExecutions: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }

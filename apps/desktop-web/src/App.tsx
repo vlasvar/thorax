@@ -44,9 +44,20 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
   const [executing, setExecuting] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [adapterError, setAdapterError] = useState("");
+  const [executions, setExecutions] = useState<any[]>([]);
+  const [workflowError, setWorkflowError] = useState("");
   const reviewInFlight = useRef(new Set<string>());
   const bindingRequest = useRef(0);
   const snapshotRequest = useRef(0);
+
+  const loadWorkflows = useCallback(async () => {
+    try {
+      const list = await api.listWorkflowExecutions();
+      setExecutions(list);
+    } catch {
+      // Silently fail workflow list retrieval in UI
+    }
+  }, [api]);
 
   const load = useCallback(async () => {
     const requestId = ++snapshotRequest.current;
@@ -84,8 +95,15 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
 
   useEffect(() => {
     void load();
-    return () => { ++snapshotRequest.current; };
-  }, [load]);
+    void loadWorkflows();
+    const timer = setInterval(() => {
+      void loadWorkflows();
+    }, 4000);
+    return () => {
+      ++snapshotRequest.current;
+      clearInterval(timer);
+    };
+  }, [load, loadWorkflows]);
 
   const activeAgent = useMemo(() => snapshot?.agents.find((agent) => agent.id === agentId), [agentId, snapshot]);
 
@@ -205,6 +223,49 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
       setAdapterError(err instanceof Error ? err.message : "Commit execution failed.");
     } finally {
       setExecuting(false);
+    }
+  }
+
+  const pilotWorkflow = useMemo(() => ({
+    id: "lease-reconciliation-run",
+    version: "1.0.0",
+    description: "Pilot Lease reconciliation workflow using Excel adapter actions.",
+    trigger: { type: "schedule", value: "manual" },
+    steps: [
+      {
+        id: "step_read",
+        type: "action",
+        adapter: "excel",
+        action: "read_lease_row",
+        input: { workbook_path: testWorkbookPath, lease_id: "L1" }
+      },
+      {
+        id: "step_update",
+        type: "action",
+        adapter: "excel",
+        action: "update_lease_row",
+        input: { workbook_path: testWorkbookPath, lease_id: "L1", updates: { rent: 2200 } }
+      }
+    ]
+  }), [testWorkbookPath]);
+
+  async function triggerPilotWorkflow() {
+    setWorkflowError("");
+    try {
+      await api.triggerWorkflow(pilotWorkflow, {});
+      await loadWorkflows();
+    } catch (err) {
+      setWorkflowError(err instanceof Error ? err.message : "Failed to trigger workflow.");
+    }
+  }
+
+  async function handleWorkflowApproval(executionId: string, approve: boolean) {
+    setWorkflowError("");
+    try {
+      await api.resumeWorkflow(executionId, pilotWorkflow, approve);
+      await loadWorkflows();
+    } catch (err) {
+      setWorkflowError(err instanceof Error ? err.message : "Failed to resolve workflow step.");
     }
   }
 
@@ -392,6 +453,65 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
             </article>
           </div>
           {adapterError && <p className="inline-error" style={{ margin: "0 16px 16px" }} role="alert">{adapterError}</p>}
+        </section>
+
+        <section className="panel workflow-panel" aria-labelledby="workflow-title">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">AUTOMATION</span>
+              <h2 id="workflow-title">Workflows</h2>
+            </div>
+            <button className="button button--secondary" onClick={triggerPilotWorkflow}>Trigger Lease Recon</button>
+          </div>
+          <div className="review-list" style={{ gridTemplateColumns: "1fr" }}>
+            {executions.length === 0 ? (
+              <EmptyState>No workflow runs triggered yet.</EmptyState>
+            ) : (
+              executions.map((exec) => (
+                <article key={exec.id} className="review-card" style={{ marginBottom: "10px" }}>
+                  <div className="review-meta" style={{ display: "flex", justifyContent: "space-between" }}>
+                    <div>
+                      <span className={`health-badge health-badge--${exec.status === "completed" ? "healthy" : exec.status === "failed" ? "offline" : exec.status === "suspended" ? "degraded" : "ready"}`}>
+                        {exec.status}
+                      </span>
+                      <span style={{ marginLeft: "10px", fontFamily: "monospace", fontSize: "10px" }}>{exec.id.slice(0, 8)}</span>
+                    </div>
+                    <span style={{ fontSize: "9px" }}>{time(exec.updatedAt)}</span>
+                  </div>
+                  <p style={{ fontSize: "12px", margin: "8px 0" }}>
+                    Workflow: <strong>{exec.workflowId}</strong>
+                    {exec.currentStepId && <span> (Current step: <code>{exec.currentStepId}</code>)</span>}
+                  </p>
+                  
+                  {exec.status === "suspended" && (
+                    <div style={{ marginTop: "12px", background: "#1c221f", padding: "10px", borderRadius: "6px" }}>
+                      <p style={{ fontSize: "11px", margin: "0 0 8px 0", color: "#edc878" }}>Awaiting operator approval to commit step updates.</p>
+                      <div className="review-actions" style={{ display: "flex", gap: "6px" }}>
+                        <button className="button button--quiet" onClick={() => handleWorkflowApproval(exec.id, false)}>Reject</button>
+                        <button className="button button--primary" onClick={() => handleWorkflowApproval(exec.id, true)}>Approve</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {exec.stepLogs.length > 0 && (
+                    <div style={{ marginTop: "8px", fontSize: "10px", color: "#8c9991" }}>
+                      <strong>Step Logs:</strong>
+                      <ul style={{ margin: "4px 0 0 0", paddingLeft: "16px" }}>
+                        {exec.stepLogs.map((log: any, idx: number) => (
+                          <li key={idx}>
+                            <code>{log.stepId}</code> - {log.status} 
+                            {log.duration_ms !== undefined && <span> ({log.duration_ms}ms)</span>}
+                            {log.error && <span style={{ color: "#f09a91" }}> - Error: {log.error}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </article>
+              ))
+            )}
+          </div>
+          {workflowError && <p className="inline-error" style={{ margin: "0 16px 16px" }} role="alert">{workflowError}</p>}
         </section>
 
         <section className="panel memory-panel" aria-labelledby="memory-title">
