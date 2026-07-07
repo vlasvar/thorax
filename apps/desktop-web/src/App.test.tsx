@@ -9,8 +9,8 @@ const snapshot: OperatorSnapshot = {
   activeAgentId: "thorax-core",
   activeProjectId: "thorax",
   agents: [
-    { id: "thorax-core", name: "Thorax Core", role: "Orchestrator", state: "ready" },
-    { id: "builder", name: "Builder", role: "Implementation", state: "working" },
+    { id: "thorax-core", name: "Thorax Core", role: "Orchestrator", state: "ready", skills: [{ id: "coordination", name: "Coordination", description: "Coordinate workflows", rules: [], systemPrompt: "coordination" }] },
+    { id: "operator", name: "Operator", role: "Implementation", state: "working", skills: [{ id: "operation", name: "Operation", description: "Execute actions safely", rules: [], systemPrompt: "operation" }] },
   ],
   projects: [
     { id: "thorax", name: "Thorax", rootPath: "C:\\work\\thorax" },
@@ -62,8 +62,8 @@ describe("operator shell", () => {
     expect(screen.getByText("Prefer project memory over personal memory.")).toBeInTheDocument();
     expect(screen.getByText("Candidate staged")).toBeInTheDocument();
     expect(screen.getByText("Runtime healthy")).toBeInTheDocument();
-    const builder = screen.getByRole("button", { name: /Builder/ });
-    expect(within(builder).getByText("working")).toHaveClass("sr-only");
+    const operatorBtn = screen.getByRole("button", { name: /Operator/ });
+    expect(within(operatorBtn).getByText("working")).toHaveClass("sr-only");
     const send = screen.getByRole("button", { name: "Send message" });
     expect(send).toHaveAttribute("aria-describedby", "composer-context-help");
     expect(document.getElementById("composer-context-help")).toHaveClass("composer-hint");
@@ -72,13 +72,13 @@ describe("operator shell", () => {
   it("uses the explicit snapshot binding instead of attaching conversation to first options", async () => {
     render(<App api={api({ loadSnapshot: vi.fn().mockResolvedValue({
       ...snapshot,
-      activeAgentId: "builder",
+      activeAgentId: "operator",
       activeProjectId: "atlas",
-      conversation: { id: "builder-atlas", messages: [{ id: "bound", author: "builder", content: "Bound to Atlas", createdAt: "2026-07-05T12:00:00Z" }] },
+      conversation: { id: "operator-atlas", messages: [{ id: "bound", author: "operator", content: "Bound to Atlas", createdAt: "2026-07-05T12:00:00Z" }] },
     }) })} />);
 
     expect(await screen.findByText("Bound to Atlas")).toBeInTheDocument();
-    expect(screen.getByLabelText("Active agent")).toHaveValue("builder");
+    expect(screen.getByLabelText("Active agent")).toHaveValue("operator");
     expect(screen.getByLabelText("Active project")).toHaveValue("atlas");
   });
 
@@ -117,18 +117,18 @@ describe("operator shell", () => {
 
   it("loads the bound conversation whenever agent or project changes", async () => {
     const loadConversation = vi.fn()
-      .mockResolvedValueOnce({ id: "builder-thorax", messages: [{ id: "b1", author: "builder", content: "Builder on Thorax", createdAt: "2026-07-05T12:02:00Z" }] })
-      .mockResolvedValueOnce({ id: "builder-atlas", messages: [{ id: "b2", author: "builder", content: "Builder on Atlas", createdAt: "2026-07-05T12:03:00Z" }] });
+      .mockResolvedValueOnce({ id: "operator-thorax", messages: [{ id: "b1", author: "operator", content: "Operator on Thorax", createdAt: "2026-07-05T12:02:00Z" }] })
+      .mockResolvedValueOnce({ id: "operator-atlas", messages: [{ id: "b2", author: "operator", content: "Operator on Atlas", createdAt: "2026-07-05T12:03:00Z" }] });
     const user = userEvent.setup();
     render(<App api={api({ loadConversation })} />);
 
     await screen.findByRole("heading", { name: "Conversation" });
-    await user.selectOptions(screen.getByLabelText("Active agent"), "builder");
-    expect(await screen.findByText("Builder on Thorax")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Active agent"), "operator");
+    expect(await screen.findByText("Operator on Thorax")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Active project"), "atlas");
-    expect(await screen.findByText("Builder on Atlas")).toBeInTheDocument();
-    expect(loadConversation).toHaveBeenNthCalledWith(1, "builder", "thorax");
-    expect(loadConversation).toHaveBeenNthCalledWith(2, "builder", "atlas");
+    expect(await screen.findByText("Operator on Atlas")).toBeInTheDocument();
+    expect(loadConversation).toHaveBeenNthCalledWith(1, "operator", "thorax");
+    expect(loadConversation).toHaveBeenNthCalledWith(2, "operator", "atlas");
   });
 
   it("does not let a slower stale conversation replace the newest binding", async () => {
@@ -139,11 +139,11 @@ describe("operator shell", () => {
     render(<App api={api({ loadConversation })} />);
 
     await screen.findByRole("heading", { name: "Conversation" });
-    await user.selectOptions(screen.getByLabelText("Active agent"), "builder");
+    await user.selectOptions(screen.getByLabelText("Active agent"), "operator");
     await user.selectOptions(screen.getByLabelText("Active project"), "atlas");
-    newer.resolve({ id: "new", messages: [{ id: "new-message", author: "builder", content: "Newest binding", createdAt: "2026-07-05T12:04:00Z" }] });
+    newer.resolve({ id: "new", messages: [{ id: "new-message", author: "operator", content: "Newest binding", createdAt: "2026-07-05T12:04:00Z" }] });
     expect(await screen.findByText("Newest binding")).toBeInTheDocument();
-    older.resolve({ id: "old", messages: [{ id: "old-message", author: "builder", content: "Stale binding", createdAt: "2026-07-05T12:03:00Z" }] });
+    older.resolve({ id: "old", messages: [{ id: "old-message", author: "operator", content: "Stale binding", createdAt: "2026-07-05T12:03:00Z" }] });
     await waitFor(() => expect(screen.queryByText("Stale binding")).not.toBeInTheDocument());
   });
 
@@ -209,6 +209,21 @@ describe("operator shell", () => {
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("conversation-1", "thorax-core", "thorax", "Inspect the queue"));
     expect(composer).toHaveValue("");
     expect(screen.getByText("I am on it.")).toBeInTheDocument();
+  });
+
+  it("shows the operator message immediately while the agent reply is pending", async () => {
+    const pendingSend = deferred<{ id: string; author: string; content: string; createdAt: string }>();
+    const user = userEvent.setup();
+    render(<App api={api({ sendMessage: vi.fn().mockReturnValue(pendingSend.promise) })} />);
+
+    const composer = await screen.findByLabelText("Message Thorax");
+    await user.type(composer, "Inspect the queue");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(screen.getByText("Inspect the queue")).toBeInTheDocument();
+    expect(composer).toHaveValue("");
+    pendingSend.resolve({ id: "m3", author: "thorax-core", content: "I am on it.", createdAt: "2026-07-05T12:02:00Z" });
+    expect(await screen.findByText("I am on it.")).toBeInTheDocument();
   });
 
   it("does not append or clear a stale send response after context changes", async () => {

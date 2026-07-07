@@ -34,6 +34,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerError, setComposerError] = useState("");
+  const [pendingOperatorMessage, setPendingOperatorMessage] = useState<ConversationMessage>();
   const [reviewed, setReviewed] = useState<Record<string, "approved" | "rejected">>({});
   const [reviewErrors, setReviewErrors] = useState<Record<string, boolean>>({});
   const [reviewPending, setReviewPending] = useState<Record<string, boolean>>({});
@@ -67,6 +68,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
       setProjectId(activeProjectId);
       setConversationId(conversation.id);
       setMessages(conversation.messages);
+      setPendingOperatorMessage(undefined);
     } catch {
       if (requestId === snapshotRequest.current) setLoadError(true);
     } finally {
@@ -87,6 +89,8 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
     const requestId = ++bindingRequest.current;
     setConversationId("");
     setMessages([]);
+    setDraft((current) => current || pendingOperatorMessage?.content || "");
+    setPendingOperatorMessage(undefined);
     setConversationError(false);
     if (!nextAgentId || !nextProjectId) return;
     setConversationLoading(true);
@@ -125,17 +129,24 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
     setSending(true);
     setComposerError("");
     const contextVersion = bindingRequest.current;
+    const pendingMessage = { id: `local-${Date.now()}`, author: "operator", content, createdAt: new Date().toISOString() };
     try {
+      setPendingOperatorMessage(pendingMessage);
+      setDraft("");
       const reply = await api.sendMessage(conversationId, agentId, projectId, content);
       if (contextVersion !== bindingRequest.current) return;
       setMessages((current) => [
         ...current,
-        { id: `local-${Date.now()}`, author: "operator", content, createdAt: new Date().toISOString() },
+        pendingMessage,
         reply,
       ]);
-      setDraft("");
+      setPendingOperatorMessage(undefined);
     } catch {
-      if (contextVersion === bindingRequest.current) setComposerError("Message was not sent. Your draft is safe—try again.");
+      if (contextVersion === bindingRequest.current) {
+        setPendingOperatorMessage(undefined);
+        setDraft(content);
+        setComposerError("Message was not sent. Your draft is safe - try again.");
+      }
     } finally {
       setSending(false);
     }
@@ -145,7 +156,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
     return (
       <main className="state-page">
         <div className="brand-mark" aria-hidden="true">T</div>
-        <p role="status">Waking the local runtime…</p>
+        <p role="status">Waking the local runtime...</p>
         <div className="loading-line" aria-hidden="true" />
       </main>
     );
@@ -164,6 +175,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
 
   const recoveryGuidance = runtimeGuidance(snapshot.runtime.codex);
   const pendingMemoryCount = snapshot.memoryCandidates.filter((candidate) => !reviewed[candidate.id]).length;
+  const visibleMessages = pendingOperatorMessage ? [...messages, pendingOperatorMessage] : messages;
 
   return (
     <div className="app-shell">
@@ -177,7 +189,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
             <span>Active agent</span>
             <select value={agentId} disabled={snapshot.agents.length === 0} onChange={(event) => void bindConversation(event.target.value, projectId)}>
               {snapshot.agents.length === 0 && <option value="">No agents available</option>}
-              {snapshot.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.role}</option>)}
+              {snapshot.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} - {agent.role}</option>)}
             </select>
           </label>
           <label>
@@ -192,18 +204,27 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
           {snapshot.agents.length === 0 && <p>No agents configured. Add an agent before sending a message.</p>}
           {snapshot.projects.length === 0 && <p>No projects configured. Add a project to start a conversation.</p>}
         </div>
-        <div className="runtime-pill"><StatusDot state={snapshot.runtime.state} />Local · {snapshot.runtime.state}</div>
+        <div className="runtime-pill"><StatusDot state={snapshot.runtime.state} />Local - {snapshot.runtime.state}</div>
       </header>
 
       <main className="dashboard">
         <section className="conversation panel" id="conversation" aria-labelledby="conversation-title">
           <div className="panel-heading">
             <div><span className="eyebrow">LIVE SESSION</span><h1 id="conversation-title">Conversation</h1></div>
-            <div className="agent-presence"><StatusDot state={activeAgent?.state ?? "offline"} />{activeAgent?.name ?? "No agent"}</div>
+            <div className="active-agent-info">
+              <div className="agent-presence"><StatusDot state={activeAgent?.state ?? "offline"} />{activeAgent?.name ?? "No agent"}</div>
+              {activeAgent?.skills && activeAgent.skills.length > 0 && (
+                <div className="agent-skills">
+                  {activeAgent.skills.map((skill) => (
+                    <span key={skill.id} className="skill-badge" title={skill.description}>{skill.name}</span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="message-list" aria-live="polite">
-            {conversationLoading ? <p className="empty-state" role="status">Loading bound conversation…</p> : conversationError ? <p className="inline-error" role="alert">Could not load this conversation. Change context to retry.</p> : messages.length === 0 ? <EmptyState>Start a conversation with the selected agent.</EmptyState> : messages.map((message) => (
-              <article className={`message message--${message.author === "operator" ? "operator" : "agent"}`} key={message.id}>
+            {conversationLoading ? <p className="empty-state" role="status">Loading bound conversation...</p> : conversationError ? <p className="inline-error" role="alert">Could not load this conversation. Change context to retry.</p> : visibleMessages.length === 0 ? <EmptyState>Start a conversation with the selected agent.</EmptyState> : visibleMessages.map((message) => (
+              <article className={`message message--${message.author === "operator" ? "operator" : "agent"}${pendingOperatorMessage?.id === message.id ? " message--pending" : ""}`} key={message.id}>
                 <div className="message-meta"><strong>{message.author === "operator" ? "You" : message.author}</strong><time dateTime={message.createdAt}>{time(message.createdAt)}</time></div>
                 <p>{message.content}</p>
               </article>
@@ -211,10 +232,10 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
           </div>
           <form className="composer" onSubmit={(event) => void send(event)}>
             <label htmlFor="message">Message Thorax</label>
-            <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Give the active agent a clear objective…" rows={3} />
+            <textarea id="message" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Give the active agent a clear objective..." rows={3} />
             <div className="composer-footer">
               <span className="composer-hint" id="composer-context-help">{agentId && projectId ? "Agent and project context are attached automatically." : "Select an available agent and project before sending."}</span>
-              <button aria-describedby="composer-context-help" className="button button--primary" disabled={sending || conversationLoading || !conversationId || !agentId || !projectId || draft.trim().length === 0} type="submit">{sending ? "Sending…" : "Send message"}</button>
+              <button aria-describedby="composer-context-help" className="button button--primary" disabled={sending || conversationLoading || !conversationId || !agentId || !projectId || draft.trim().length === 0} type="submit">{sending ? "Sending..." : "Send message"}</button>
             </div>
             {composerError && <p className="inline-error" role="alert">{composerError}</p>}
           </form>
@@ -238,7 +259,15 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
                 <li key={agent.id} className={agent.id === agentId ? "is-active" : ""}>
                   <button onClick={() => void bindConversation(agent.id, projectId)} aria-pressed={agent.id === agentId}>
                     <span className="agent-avatar">{agent.name.slice(0, 2).toUpperCase()}</span>
-                    <span><strong>{agent.name}</strong><small>{agent.role}</small></span>
+                    <span>
+                      <strong>{agent.name}</strong>
+                      <small>{agent.role}</small>
+                      {agent.skills && agent.skills.length > 0 && (
+                        <span className="agent-skills-inline">
+                          {agent.skills.map((s) => s.name).join(", ")}
+                        </span>
+                      )}
+                    </span>
                     <StatusDot state={agent.state} />
                   </button>
                 </li>
@@ -259,7 +288,7 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
                 ) : (
                   <div className="review-actions">
                     <button className="button button--quiet" disabled={reviewPending[candidate.id]} onClick={() => void review(candidate, "reject")}>Reject memory</button>
-                    <button aria-label={reviewPending[candidate.id] ? "Saving memory review" : "Approve memory"} className="button button--secondary" disabled={reviewPending[candidate.id]} onClick={() => void review(candidate, "approve")}>{reviewPending[candidate.id] ? "Saving…" : "Approve memory"}</button>
+                    <button aria-label={reviewPending[candidate.id] ? "Saving memory review" : "Approve memory"} className="button button--secondary" disabled={reviewPending[candidate.id]} onClick={() => void review(candidate, "approve")}>{reviewPending[candidate.id] ? "Saving..." : "Approve memory"}</button>
                   </div>
                 )}
                 {reviewErrors[candidate.id] && <p className="inline-error" role="alert">Review was not saved. The candidate remains in your queue.</p>}

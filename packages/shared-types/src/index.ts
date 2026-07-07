@@ -3,12 +3,52 @@ import { z } from "zod";
 export const agentIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
 export const projectIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
 
+export const skillSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  rules: z.array(z.string()),
+  systemPrompt: z.string().min(1),
+});
+
+export const adapterRiskTierSchema = z.enum([
+  "read_only",
+  "write_reversible",
+  "write_irreversible",
+  "external_side_effect",
+]);
+
+export const adapterActionSchema = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  risk_tier: adapterRiskTierSchema,
+  description: z.string().min(1),
+  input_schema: z.record(z.unknown()),
+  output_schema: z.record(z.unknown()),
+  dry_run_supported: z.boolean(),
+  rollback: z.object({
+    supported: z.boolean(),
+    method: z.string().min(1),
+  }).optional(),
+});
+
+export const adapterManifestSchema = z.object({
+  adapter: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  version: z.string().min(1),
+  description: z.string().min(1),
+  auth: z.object({
+    type: z.enum(["none", "oauth", "service_account", "credentials_file"]),
+    config_ref: z.string().optional(),
+  }),
+  actions: z.array(adapterActionSchema).min(1),
+});
+
 export const agentDefinitionSchema = z.object({
   id: agentIdSchema,
   name: z.string().min(1),
   instructions: z.string().min(1),
   projectAccess: z.array(projectIdSchema),
   memoryDirectory: z.string().min(1).optional(),
+  skills: z.array(z.string()).optional(),
 });
 
 export const projectDefinitionSchema = z.object({
@@ -73,6 +113,7 @@ export const thoraxConfigSchema = z.object({
 export const agentSummarySchema = agentDefinitionSchema.pick({ id: true, name: true }).extend({
   role: z.string().min(1),
   state: z.enum(["ready", "working", "offline"]),
+  skills: z.array(skillSchema),
 });
 export const projectSummarySchema = projectDefinitionSchema.pick({ id: true, name: true, rootPath: true });
 export const conversationMessageSchema = z.object({
@@ -102,6 +143,10 @@ export const operatorSnapshotSchema = z.object({
   runtime: runtimeSummarySchema,
 });
 
+export type Skill = z.infer<typeof skillSchema>;
+export type AdapterRiskTier = z.infer<typeof adapterRiskTierSchema>;
+export type AdapterAction = z.infer<typeof adapterActionSchema>;
+export type AdapterManifest = z.infer<typeof adapterManifestSchema>;
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type ProjectDefinition = z.infer<typeof projectDefinitionSchema>;
 export type MemoryCandidate = z.infer<typeof memoryCandidateSchema>;

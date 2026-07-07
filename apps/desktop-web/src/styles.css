@@ -31,3 +31,9 @@ select { min-width: 190px; height: 50px; padding: 20px 34px 5px 12px; color: #dc
 @media (max-width: 900px) { .topbar { flex-wrap: wrap; position: static; }.context-controls { order: 3; width: 100%; }.context-controls label { flex: 1; }.context-controls select { width: 100%; }.dashboard { grid-template-columns: 1fr; }.review-list { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .runtime-pill { margin-left: auto; }.context-controls { flex-direction: column; }.message { max-width: 92%; }.composer-footer { align-items: flex-end; }.composer-hint { display: none; }.status-grid { padding-inline: 8px; } }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+
+.active-agent-info { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.agent-skills { display: flex; flex-wrap: wrap; gap: 4px; }
+.skill-badge { padding: 3px 8px; border-radius: 4px; color: #80dd9f; background: #14221a; border: 1px solid #294233; font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
+.agent-skills-inline { display: block; margin-top: 3px; color: #55665c; font-size: 8px; font-family: "DM Mono", monospace; }
+

@@ -4,9 +4,9 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { CodexEvent, CodexHealth, RunTurnOptions } from "@thorax/codex-bridge";
-import { AgentRegistry, ConversationStore, LearningPipeline, defaultAgents, extractLearning, type StoredConversation, type StoredMessage } from "@thorax/core";
+import { AgentRegistry, ConversationStore, LearningPipeline, SkillRegistry, defaultAgents, extractLearning, type StoredConversation, type StoredMessage } from "@thorax/core";
 import { MemoryEngine } from "@thorax/memory-engine";
-import { conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, type ProjectDefinition } from "@thorax/shared-types";
+import { conversationMessageSchema, conversationSummarySchema, operatorSnapshotSchema, type ProjectDefinition, type Skill } from "@thorax/shared-types";
 
 export interface RuntimePort {
   health(): Promise<CodexHealth>;
@@ -23,8 +23,11 @@ export interface Logger { write(entry: LogEntry): void }
 
 export class ThoraxService {
   readonly #registry: AgentRegistry;
+  readonly #skills: SkillRegistry;
   readonly #learning: LearningPipeline;
   readonly #locks = new Map<string, Promise<unknown>>();
+  readonly #healthCacheTtlMs = 10_000;
+  #cachedHealth: { value: CodexHealth; expiresAt: number } | undefined;
 
   private constructor(
     readonly dataDirectory: string,
@@ -32,8 +35,10 @@ export class ThoraxService {
     private readonly runtime: RuntimePort,
     private readonly conversations: ConversationStore,
     private readonly memory: MemoryEngine,
+    skills: SkillRegistry,
   ) {
     this.#registry = new AgentRegistry(defaultAgents.map((agent) => ({ ...agent, projectAccess: [project.id] })));
+    this.#skills = skills;
     this.#learning = new LearningPipeline(memory);
   }
 
@@ -46,13 +51,14 @@ export class ThoraxService {
     }
     const conversations = await ConversationStore.open(join(options.dataDirectory, "conversations.json"));
     const memory = await MemoryEngine.open({ dataDirectory: join(options.dataDirectory, "memory") });
-    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory);
+    const skills = await SkillRegistry.load(options.project.rootPath);
+    return new ThoraxService(options.dataDirectory, options.project, options.runtime, conversations, memory, skills);
   }
 
   close(): void { this.memory.close(); }
 
   async snapshot() {
-    const health = await this.runtime.health();
+    const health = await this.#health();
     const agents = this.#registry.list();
     const activeAgentId = agents[0]?.id;
     if (!activeAgentId) throw new Error("Thorax has no configured agents.");
@@ -61,7 +67,18 @@ export class ThoraxService {
     return operatorSnapshotSchema.parse({
       activeAgentId,
       activeProjectId: this.project.id,
-      agents: agents.map((agent) => ({ id: agent.id, name: agent.name, role: agent.instructions.split(".")[0] ?? agent.name, state: health.status === "ready" ? "ready" : "offline" })),
+      agents: agents.map((agent) => {
+        const resolvedSkills = (agent.skills ?? [])
+          .map((id) => this.#skills.get(id))
+          .filter((s): s is Skill => !!s);
+        return {
+          id: agent.id,
+          name: agent.name,
+          role: agent.instructions.split(".")[0] ?? agent.name,
+          state: health.status === "ready" ? "ready" : "offline",
+          skills: resolvedSkills,
+        };
+      }),
       projects: [this.project],
       conversation: publicConversation(conversation),
       memoryCandidates: pending.map((record) => ({ id: record.id, content: record.content, scope: record.scope, source: record.evidence[0]?.conversationId ?? "unknown", createdAt: record.createdAt })),
@@ -96,7 +113,31 @@ export class ThoraxService {
     await this.conversations.append(conversationId, { author: "operator", content: cleanContent });
     const memories = await this.memory.retrieve({ agentId, projectId });
     const memoryText = memories.map((record) => `- ${record.content}`).join("\n") || "- No durable memory yet.";
-    const prompt = `${agent.instructions}\n\nProject: ${this.project.name}\nProject root: ${this.project.rootPath}\n\nRelevant memory (project overrides agent overrides personal):\n${memoryText}\n\nWhen you discover a reusable lesson, append exactly one private marker per lesson: <thorax-memory scope="project|agent|personal|instruction">lesson</thorax-memory>. Do not mention these markers in normal prose. Durable markers are review candidates and never apply automatically.\n\nOperator request:\n${cleanContent}`;
+
+    const activeSkills = (agent.skills ?? [])
+      .map((id) => this.#skills.get(id))
+      .filter((s): s is Skill => !!s);
+
+    let skillsSection = "";
+    if (activeSkills.length > 0) {
+      skillsSection = "\n\nActive Capabilities:\n" + activeSkills.map((skill) => {
+        const rulesStr = skill.rules.map((r) => `- ${r}`).join("\n");
+        return `### Skill: ${skill.name} (${skill.id})\n${skill.systemPrompt}\nGuidelines:\n${rulesStr}`;
+      }).join("\n\n");
+    }
+
+    let teamSection = "";
+    if (agent.id === "thorax-core") {
+      const otherAgents = this.#registry.list().filter((a) => a.id !== "thorax-core");
+      teamSection = "\n\nAvailable specialist agents in this workspace:\n" + otherAgents.map((a) => {
+        const skillsList = (a.skills ?? [])
+          .map((sid) => this.#skills.get(sid)?.name ?? sid)
+          .join(", ");
+        return `- Agent: ${a.name} (${a.id}) - Role: ${a.instructions.split(".")[0]} - Skills: [${skillsList}]`;
+      }).join("\n");
+    }
+
+    const prompt = `${agent.instructions}${skillsSection}${teamSection}\n\nProject: ${this.project.name}\nProject root: ${this.project.rootPath}\n\nRelevant memory (project overrides agent overrides personal):\n${memoryText}\n\nWhen you discover a reusable lesson, append exactly one private marker per lesson: <thorax-memory scope="project|agent|personal|instruction">lesson</thorax-memory>. Do not mention these markers in normal prose. Durable markers are review candidates and never apply automatically.\n\nOperator request:\n${cleanContent}`;
     let threadId = conversation.codexThreadId;
     let turnId: string | undefined;
     let response = "";
@@ -116,6 +157,14 @@ export class ThoraxService {
     const extracted = extractLearning(response, { conversationId, agentId, projectId, ...(turnId ? { turnId } : {}) });
     await this.#learning.ingest(extracted.candidates);
     return conversationMessageSchema.parse(await this.conversations.append(conversationId, { author: agentId, content: extracted.visibleText || "Codex completed without a text response." }));
+  }
+
+  async #health(): Promise<CodexHealth> {
+    const now = Date.now();
+    if (this.#cachedHealth && this.#cachedHealth.expiresAt > now) return this.#cachedHealth.value;
+    const value = await this.runtime.health();
+    this.#cachedHealth = { value, expiresAt: now + this.#healthCacheTtlMs };
+    return value;
   }
 }
 

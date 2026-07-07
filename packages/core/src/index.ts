@@ -5,12 +5,15 @@ import type { AgentDefinition } from "@thorax/shared-types";
 import type { MemoryEvidence, MemoryInput } from "@thorax/memory-engine";
 
 export const defaultAgents: readonly AgentDefinition[] = [
-  { id: "thorax-core", name: "Thorax Core", instructions: "Coordinate work, preserve context, and delegate to the most suitable specialist.", projectAccess: [] },
-  { id: "research", name: "Research", instructions: "Investigate carefully, cite evidence, distinguish facts from inference, and return concise findings.", projectAccess: [] },
-  { id: "builder", name: "Builder", instructions: "Implement changes safely, test first, verify results, and preserve unrelated work.", projectAccess: [] },
-  { id: "reviewer", name: "Reviewer", instructions: "Review independently for correctness, security, maintainability, and requirement coverage.", projectAccess: [] },
-  { id: "memory-curator", name: "Memory Curator", instructions: "Extract reusable lessons with evidence and send durable changes through review.", projectAccess: [] },
+  { id: "thorax-core", name: "Thorax Core", instructions: "Coordinate work, preserve context, and delegate to the most suitable specialist.", projectAccess: [], skills: ["coordination"] },
+  { id: "research", name: "Research", instructions: "Investigate carefully, cite evidence, distinguish facts from inference, and return concise findings.", projectAccess: [], skills: ["research"] },
+  { id: "operator", name: "Operator", instructions: "Execute actions safely in any domain — code, spreadsheets, or external systems — test first, verify results, and preserve unrelated state.", projectAccess: [], skills: ["operation"] },
+  { id: "reviewer", name: "Reviewer", instructions: "Review independently for correctness, security, maintainability, and requirement coverage.", projectAccess: [], skills: ["reviewer"] },
+  { id: "memory-curator", name: "Memory Curator", instructions: "Extract reusable lessons with evidence and send durable changes through review.", projectAccess: [], skills: ["memory-curation"] },
 ] as const;
+
+export { defaultSkills, SkillRegistry } from "./skills.js";
+export { AdapterRegistry } from "./adapters.js";
 
 export class AgentRegistry {
   readonly #agents: Map<string, AgentDefinition>;

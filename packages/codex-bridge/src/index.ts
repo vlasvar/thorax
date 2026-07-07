@@ -388,9 +388,14 @@ export class CodexRuntime {
       options.signal?.removeEventListener("abort", onAbort);
       try {
         await withTimeout(connection.close(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Codex app-server did not shut down in time.");
-      } catch (error) {
-        console.error("Warning: Codex app-server shutdown timed out, forcing termination:", error);
-        await withTimeout(connection.terminate(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Forced Codex shutdown timed out.").catch(() => undefined);
+      } catch (shutdownError) {
+        console.error("Warning: Codex app-server shutdown timed out, forcing termination:", shutdownError);
+        try {
+          await withTimeout(connection.terminate(), this.#timeouts.shutdownMs, "SHUTDOWN_TIMEOUT", "Forced Codex shutdown timed out.");
+        } catch (terminationError) {
+          if (!activeError) activeError = terminationError;
+        }
+        if (!activeError) activeError = shutdownError;
       }
       if (activeError) throw activeError;
     }

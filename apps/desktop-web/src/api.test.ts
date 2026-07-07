@@ -13,7 +13,7 @@ describe("operatorApi", () => {
   it("loads the operator snapshot from the local server", async () => {
     const body = {
       activeAgentId: "builder", activeProjectId: "thorax",
-      agents: [{ id: "builder", name: "Builder", role: "Build", state: "ready" }],
+      agents: [{ id: "builder", name: "Builder", role: "Build", state: "ready", skills: [] }],
       projects: [{ id: "thorax", name: "Thorax", rootPath: "C:/thorax" }],
       conversation: { id: "c1", messages: [] }, memoryCandidates: [], learningEvents: [],
       runtime: { state: "healthy", codex: "signed-in", activeSessions: 1, version: "test" },
