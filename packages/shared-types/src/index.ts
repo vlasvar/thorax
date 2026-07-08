@@ -9,6 +9,7 @@ export const skillSchema = z.object({
   description: z.string().min(1),
   rules: z.array(z.string()),
   systemPrompt: z.string().min(1),
+  version: z.string().optional(),
 });
 
 export const adapterRiskTierSchema = z.enum([
@@ -247,3 +248,32 @@ export type MemoryReviewCandidate = z.infer<typeof memoryReviewCandidateSchema>;
 export type LearningEvent = z.infer<typeof learningEventSchema>;
 export type RuntimeSummary = z.infer<typeof runtimeSummarySchema>;
 export type OperatorSnapshot = z.infer<typeof operatorSnapshotSchema>;
+
+export const skillRunSchema = z.object({
+  id: z.string().uuid(),
+  skillName: z.string().min(1),
+  skillVersion: z.string().min(1),
+  timestamp: z.string().datetime(),
+  inputSummary: z.string(),
+  output: z.string(),
+  outcome: z.enum(["success", "failure", "partial"]),
+  score: z.number().min(0).max(1),
+  humanOverride: z.boolean(),
+  correctionNotes: z.string().nullable(),
+});
+
+export const skillEditSchema = z.object({
+  id: z.string().uuid(),
+  skillName: z.string().min(1),
+  baseVersion: z.string().min(1),
+  proposedDiff: z.string(),
+  rationale: z.string(),
+  validationScoreBefore: z.number(),
+  validationScoreAfter: z.number(),
+  status: z.enum(["proposed", "accepted", "rejected"]),
+  rejectionReason: z.string().nullable(),
+});
+
+export type SkillRun = z.infer<typeof skillRunSchema>;
+export type SkillEdit = z.infer<typeof skillEditSchema>;
+

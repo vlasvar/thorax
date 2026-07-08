@@ -21,6 +21,7 @@ export type {
   RuntimeSummary,
   AdapterDryRunResult,
   AdapterCommitResult,
+  SkillEdit,
 } from "@thorax/shared-types";
 
 export interface OperatorApi {

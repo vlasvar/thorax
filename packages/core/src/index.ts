@@ -12,7 +12,7 @@ export const defaultAgents: readonly AgentDefinition[] = [
   { id: "memory-curator", name: "Memory Curator", instructions: "Extract reusable lessons with evidence and send durable changes through review.", projectAccess: [], skills: ["memory-curation"] },
 ] as const;
 
-export { defaultSkills, SkillRegistry } from "./skills.js";
+export { defaultSkills, SkillRegistry, parseSkillMarkdown, stringifySkillMarkdown, applyPatch, getSkillHash } from "./skills.js";
 export { AdapterRegistry } from "./adapters.js";
 export { DispatchRegistry, FakeAdapter, ApprovalRequiredError, UnknownActionError, UnknownAdapterError, type AdapterPort, type DispatchRequest, type FakeAdapterCall, type FakeAdapterOptions } from "./dispatch.js";
 
@@ -217,10 +217,10 @@ export class ConversationStore {
     return structuredClone(value);
   }
 
-  async append(id: string, input: { author: string; content: string }): Promise<StoredMessage> {
+  async append(id: string, input: { author: string; content: string; id?: string }): Promise<StoredMessage> {
     const value = this.#requireMutable(id);
     const message: StoredMessage = {
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       author: requireText(input.author, "Message author"),
       content: requireText(input.content, "Message content"),
       createdAt: new Date().toISOString(),

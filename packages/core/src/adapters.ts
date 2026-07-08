@@ -40,6 +40,10 @@ export class AdapterRegistry {
     return this.#adapters.get(adapterId);
   }
 
+  register(manifest: AdapterManifest): void {
+    this.#adapters.set(manifest.adapter, structuredClone(manifest));
+  }
+
   list(): AdapterManifest[] {
     return [...this.#adapters.values()];
   }

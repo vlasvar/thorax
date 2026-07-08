@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ConversationMessage, MemoryReviewCandidate, OperatorApi, OperatorSnapshot } from "./api";
+import type { ConversationMessage, MemoryReviewCandidate, OperatorApi, OperatorSnapshot, SkillEdit } from "./api";
 import { operatorApi } from "./api";
 import "./styles.css";
 
@@ -104,6 +104,51 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
       clearInterval(timer);
     };
   }, [load, loadWorkflows]);
+
+  async function submitFeedback(messageId: string, score: number, outcome: string) {
+    try {
+      const notes = prompt("Enter correction notes (optional):");
+      await fetch(`/api/skills/runs/${messageId}/feedback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          score,
+          outcome,
+          humanOverride: true,
+          correctionNotes: notes || null
+        })
+      });
+      setToastMessage("Feedback logged successfully!");
+      setTimeout(() => setToastMessage(""), 3000);
+      void load();
+      void loadWorkflows();
+    } catch (err) {
+      console.error("Failed to submit feedback:", err);
+    }
+  }
+
+  async function optimizeSkill(skillId: string) {
+    try {
+      setExecuting(true);
+      const res = await fetch("/api/skills/optimize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skillId })
+      }).then(r => r.json());
+      if (res.error) {
+        setToastMessage(`Optimization trigger failed: ${res.error}`);
+      } else {
+        setToastMessage(`Optimization workflow triggered successfully for skill ${skillId}!`);
+      }
+      setTimeout(() => setToastMessage(""), 5000);
+      void load();
+      void loadWorkflows();
+    } catch (err) {
+      console.error("Failed to trigger skill optimization:", err);
+    } finally {
+      setExecuting(false);
+    }
+  }
 
   const activeAgent = useMemo(() => snapshot?.agents.find((agent) => agent.id === agentId), [agentId, snapshot]);
 
@@ -349,6 +394,12 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
               <article className={`message message--${message.author === "operator" ? "operator" : "agent"}${pendingOperatorMessage?.id === message.id ? " message--pending" : ""}`} key={message.id}>
                 <div className="message-meta"><strong>{message.author === "operator" ? "You" : message.author}</strong><time dateTime={message.createdAt}>{time(message.createdAt)}</time></div>
                 <p>{message.content}</p>
+                {message.author !== "operator" && (
+                  <div style={{ display: "flex", gap: "10px", marginTop: "8px", justifyContent: "flex-end" }}>
+                    <button className="button button--quiet" style={{ fontSize: "10px", padding: "2px 6px" }} onClick={() => void submitFeedback(message.id, 1.0, "success")}>👍 Success</button>
+                    <button className="button button--quiet" style={{ fontSize: "10px", padding: "2px 6px" }} onClick={() => void submitFeedback(message.id, 0.0, "failure")}>👎 Failure</button>
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -385,8 +436,12 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
                       <strong>{agent.name}</strong>
                       <small>{agent.role}</small>
                       {agent.skills && agent.skills.length > 0 && (
-                        <span className="agent-skills-inline">
-                          {agent.skills.map((s) => s.name).join(", ")}
+                        <span className="agent-skills-inline" style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
+                          {agent.skills.map((s) => (
+                            <span key={s.id} className="scope-tag" style={{ margin: 0, fontSize: "9px", cursor: "pointer", display: "inline-flex", alignItems: "center" }} onClick={(e) => { e.stopPropagation(); void optimizeSkill(s.id); }} title="Click to optimize this skill">
+                              ⚙️ {s.name}
+                            </span>
+                          ))}
                         </span>
                       )}
                     </span>
@@ -483,15 +538,29 @@ export function App({ api = operatorApi }: { api?: OperatorApi }) {
                     {exec.currentStepId && <span> (Current step: <code>{exec.currentStepId}</code>)</span>}
                   </p>
                   
-                  {exec.status === "suspended" && (
-                    <div style={{ marginTop: "12px", background: "#1c221f", padding: "10px", borderRadius: "6px" }}>
-                      <p style={{ fontSize: "11px", margin: "0 0 8px 0", color: "#edc878" }}>Awaiting operator approval to commit step updates.</p>
-                      <div className="review-actions" style={{ display: "flex", gap: "6px" }}>
-                        <button className="button button--quiet" onClick={() => handleWorkflowApproval(exec.id, false)}>Reject</button>
-                        <button className="button button--primary" onClick={() => handleWorkflowApproval(exec.id, true)}>Approve</button>
+                  {exec.status === "suspended" && (() => {
+                    const pendingEdit = (snapshot as any).pendingSkillEdits?.find((e: any) => e.skillName === exec.context.skillId);
+                    return (
+                      <div style={{ marginTop: "12px", background: "#1c221f", padding: "10px", borderRadius: "6px" }}>
+                        <p style={{ fontSize: "11px", margin: "0 0 8px 0", color: "#edc878" }}>Awaiting operator approval to commit step updates.</p>
+                        {pendingEdit && (
+                          <div style={{ margin: "10px 0", borderTop: "1px solid #28332e", paddingTop: "8px", textAlign: "left" }}>
+                            <p style={{ fontSize: "11px", color: "#87dfa5", margin: "4px 0" }}><strong>Skill Optimization Proposal:</strong> {pendingEdit.skillName}</p>
+                            <p style={{ fontSize: "11px", color: "#c5d0ca", margin: "4px 0" }}><strong>Diagnosis:</strong> {pendingEdit.rationale}</p>
+                            <p style={{ fontSize: "11px", color: "#c5d0ca", margin: "4px 0" }}><strong>Validation Score Before:</strong> {(pendingEdit.validationScoreBefore * 100).toFixed(1)}%</p>
+                            <p style={{ fontSize: "11px", color: "#c5d0ca", margin: "4px 0" }}><strong>Validation Score After:</strong> {(pendingEdit.validationScoreAfter * 100).toFixed(1)}%</p>
+                            <pre className="diff-preview" style={{ background: "#0c0f0d", padding: "8px", borderRadius: "4px", fontSize: "10px", overflowX: "auto", border: "1px solid #1c221f", margin: "8px 0" }}>
+                              {pendingEdit.proposedDiff}
+                            </pre>
+                          </div>
+                        )}
+                        <div className="review-actions" style={{ display: "flex", gap: "6px" }}>
+                          <button className="button button--quiet" onClick={() => handleWorkflowApproval(exec.id, false)}>Reject</button>
+                          <button className="button button--primary" onClick={() => handleWorkflowApproval(exec.id, true)}>Approve</button>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {exec.stepLogs.length > 0 && (
                     <div style={{ marginTop: "8px", fontSize: "10px", color: "#8c9991" }}>
